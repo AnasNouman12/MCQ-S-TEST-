@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCQ'S TEST</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(30px) scale(0.95); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .animate-fadeInUp {
+            animation: fadeInUp 0.8s ease-out forwards;
+        }
+        .animate-fadeInUp-delay {
+            animation: fadeInUp 0.8s ease-out 0.4s forwards;
+            opacity: 0;
+        }
+        .animate-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 font-sans text-slate-900 antialiased selection:bg-blue-200 min-h-screen flex flex-col">
+    
+    <div id="root" class="flex-1 flex flex-col w-full h-full"></div>
+    <div id="toast-container" class="fixed bottom-0 right-0 p-4 space-y-2 z-50 pointer-events-none flex flex-col items-end"></div>
+
+    <script>
+        // --- UTILITIES ---
+        const generateId = () => Math.random().toString(36).substr(2, 9);
+        const generateTokenCode = () => `MCQ-2026-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+        const shuffleArray = (array) => [...array].sort(() => Math.random() - 0.5);
+        
+        // --- GLOBAL STATE ---
+        const appState = {
+            view: 'splash', // splash, auth, admin, student, exam
+            currentUser: null,
+            adminTab: 'overview',
+            authView: 'login',
+            editingTest: null,
+            showBulkImport: false,
+            bulkText: '',
+            activeExamId: null,
+            examPhase: 'PRE_CHECK',
+            examQuestions: [],
+            examCurrentIdx: 0,
+            examAnswers: {},
+            examMarked: {},
+            examTimeLeft: 0,
+            examTimer: null,
+            proctorLogs: [],
+            permissionsGranted: false,
+            db: {
+                users: [
+                    { id: 'admin1', role: 'ADMIN', name: 'AnasNouman (Admin)', email: 'admin@mcqstest.com', password: 'admin', rollNumber: 'ADMIN' },
+                    { id: 'student1', role: 'STUDENT', name: 'John Doe', email: 'john@example.com', password: 'password', rollNumber: 'STU-001' }
+                ],
+                tokens: [
+                    { id: 't1', code: 'MCQ-2026-DEMO01', isUsed: false, assignedTo: null }
+                ],
+                tests: [
+                    {
+                        id: 'test1', title: 'Advanced React & Architecture', subject: 'Computer Science', description: 'Test your knowledge on React, Next.js, and App Router architecture.',
+                        duration: 10, totalMarks: 20, passingMarks: 10, status: 'PUBLISHED', assignedStudents: ['student1'],
+                        questions: [
+                            { id: 'q1', text: 'Which component is default in Next.js 15 App Router?', options: ['Client Component', 'Server Component', 'Edge Component', 'Static Component'], correctOption: 1, marks: 5 },
+                            { id: 'q2', text: 'What hook is used for complex state management in React?', options: ['useState', 'useEffect', 'useReducer', 'useId'], correctOption: 2, marks: 5 },
+                            { id: 'q3', text: 'Which tool validates schemas in our tech stack?', options: ['Yup', 'Joi', 'Zod', 'Validator'], correctOption: 2, marks: 5 },
+                            { id: 'q4', text: 'What database ORM are we using?', options: ['TypeORM', 'Prisma', 'Sequelize', 'Mongoose'], correctOption: 1, marks: 5 },
+                        ]
+                    }
+                ],
+                attempts: []
+            }
+        };
+
+        // --- TOAST NOTIFICATIONS ---
+        function addToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const bg = type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-600' : 'bg-slate-900';
+            const icon = type === 'error' ? 'x-circle' : type === 'success' ? 'check-circle-2' : 'shield-check';
+            
+            const toast = document.createElement('div');
+            toast.className = `${bg} text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 animate-in pointer-events-auto`;
+            toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i> <p class="text-sm font-medium">${message}</p>`;
+            
+            container.appendChild(toast);
+            lucide.createIcons({ root: toast });
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.3s';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- MASTER RENDER FUNCTION ---
+        function render() {
+            const root = document.getElementById('root');
+            if (appState.view === 'splash') root.innerHTML = getSplashHTML();
+            else if (appState.view === 'auth') root.innerHTML = getAuthHTML();
+            else if (appState.view === 'admin') root.innerHTML = getAdminHTML();
+            else if (appState.view === 'student') root.innerHTML = getStudentHTML();
+            else if (appState.view === 'exam') root.innerHTML = getExamHTML();
+            
+            lucide.createIcons();
+            attachDynamicListeners();
+        }
+
+        // --- SPLASH SCREEN ---
+        function getSplashHTML() {
+            setTimeout(() => {
+                appState.view = appState.currentUser ? (appState.currentUser.role === 'ADMIN' ? 'admin' : 'student') : 'auth';
+                render();
+            }, 3000);
+
+            return `
+                <div class="fixed inset-0 min-h-screen bg-slate-900 flex flex-col items-center justify-center relative overflow-hidden z-50">
+                    <div class="absolute inset-0 flex items-center justify-center opacity-20">
+                        <div class="w-[600px] h-[600px] bg-blue-500 rounded-full blur-[120px] animate-pulse duration-1000"></div>
+                    </div>
+                    <div class="z-10 flex flex-col items-center text-center">
+                        <div class="w-24 h-24 bg-blue-600 rounded-3xl flex items-center justify-center mb-8 shadow-[0_0_60px_rgba(37,99,235,0.6)] animate-bounce">
+                            <i data-lucide="shield-check" class="w-14 h-14 text-white"></i>
+                        </div>
+                        <h1 class="text-5xl md:text-7xl font-black text-white mb-4 tracking-tighter animate-fadeInUp">MCQ'S TEST</h1>
+                        <p class="text-xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400 tracking-[0.2em] animate-fadeInUp-delay">
+                            BY ANASNOUMAN DEVELOPER
+                        </p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- AUTH MODULE ---
+        function getAuthHTML() {
+            const isLogin = appState.authView === 'login';
+            return `
+                <div class="min-h-screen w-full bg-slate-50 flex items-center justify-center p-4">
+                    <div class="w-full max-w-md">
+                        <div class="text-center mb-8">
+                            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-900 text-white mb-4">
+                                <i data-lucide="shield-check" class="w-8 h-8"></i>
+                            </div>
+                            <h1 class="text-3xl font-bold text-slate-900">MCQ'S TEST</h1>
+                            <p class="text-slate-500 mt-2">Secure Online Examination Platform</p>
+                        </div>
+
+                        <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+                            <div class="flex gap-4 mb-6 border-b border-slate-100 pb-4">
+                                <button onclick="setAuthView('login')" class="flex-1 pb-2 text-sm font-semibold border-b-2 transition-colors ${isLogin ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}">Sign In</button>
+                                <button onclick="setAuthView('register')" class="flex-1 pb-2 text-sm font-semibold border-b-2 transition-colors ${!isLogin ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400'}">Register (Student)</button>
+                            </div>
+                            
+                            <div id="auth-error" class="hidden bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 items-center gap-2"></div>
+
+                            ${isLogin ? `
+                                <form onsubmit="handleLogin(event)" class="space-y-4">
+                                    <div class="space-y-1">
+                                        <label class="text-sm font-medium text-slate-700">Email Address</label>
+                                        <input type="email" id="login-email" required class="w-full h-10 px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:border-slate-900 text-sm">
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-sm font-medium text-slate-700">Password</label>
+                                        <input type="password" id="login-password" required class="w-full h-10 px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:border-slate-900 text-sm">
+                                    </div>
+                                    <button type="submit" class="w-full h-10 mt-2 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors">Access Dashboard</button>
+                                </form>
+                            ` : `
+                                <form onsubmit="handleRegister(event)" class="space-y-4">
+                                    <div class="space-y-1">
+                                        <label class="text-sm font-medium text-slate-700">Registration Token</label>
+                                        <input type="text" id="reg-token" placeholder="MCQ-2026-XXXXXX" required class="w-full h-10 px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:border-slate-900 text-sm">
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-sm font-medium text-slate-700">Full Name</label>
+                                        <input type="text" id="reg-name" required class="w-full h-10 px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:border-slate-900 text-sm">
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-sm font-medium text-slate-700">Roll Number</label>
+                                        <input type="text" id="reg-roll" required class="w-full h-10 px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:border-slate-900 text-sm">
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-sm font-medium text-slate-700">Email Address</label>
+                                        <input type="email" id="reg-email" required class="w-full h-10 px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:border-slate-900 text-sm">
+                                    </div>
+                                    <div class="space-y-1">
+                                        <label class="text-sm font-medium text-slate-700">Password</label>
+                                        <input type="password" id="reg-password" required class="w-full h-10 px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:border-slate-900 text-sm">
+                                    </div>
+                                    <button type="submit" class="w-full h-10 mt-2 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors">Create Account</button>
+                                </form>
+                            `}
+                        </div>
+                        <p class="text-center text-sm text-slate-400 mt-8">Architected by <span class="font-semibold text-slate-600">AnasNouman</span></p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function setAuthView(view) {
+            appState.authView = view;
+            render();
+        }
+
+        function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const pass = document.getElementById('login-password').value;
+            const user = appState.db.users.find(u => u.email === email && u.password === pass);
+            if (user) {
+                appState.currentUser = user;
+                appState.view = user.role === 'ADMIN' ? 'admin' : 'student';
+                render();
+            } else {
+                showAuthError('Invalid email or password');
+            }
+        }
+
+        function handleRegister(e) {
+            e.preventDefault();
+            const token = document.getElementById('reg-token').value;
+            const name = document.getElementById('reg-name').value;
+            const roll = document.getElementById('reg-roll').value;
+            const email = document.getElementById('reg-email').value;
+            const pass = document.getElementById('reg-password').value;
+
+            const tokenIndex = appState.db.tokens.findIndex(t => t.code === token && !t.isUsed);
+            if (tokenIndex === -1) return showAuthError('Invalid or already used Registration Token');
+            if (appState.db.users.some(u => u.email === email)) return showAuthError('Email already exists');
+
+            const newUser = { id: generateId(), role: 'STUDENT', name, email, password: pass, rollNumber: roll };
+            appState.db.tokens[tokenIndex].isUsed = true;
+            appState.db.tokens[tokenIndex].assignedTo = newUser.id;
+            appState.db.users.push(newUser);
+            
+            appState.currentUser = newUser;
+            appState.view = 'student';
+            render();
+        }
+
+        function showAuthError(msg) {
+            const el = document.getElementById('auth-error');
+            el.innerHTML = `<i data-lucide="alert-triangle" class="w-4 h-4"></i> ${msg}`;
+            el.style.display = 'flex';
+            lucide.createIcons();
+        }
+
+        function handleLogout() {
+            appState.currentUser = null;
+            appState.view = 'auth';
+            render();
+        }
+
+        // --- ADMIN MODULE ---
+        function getAdminHTML() {
+            const tabs = [
+                { id: 'overview', icon: 'layout-dashboard', label: 'Dashboard' },
+                { id: 'students', icon: 'users', label: 'Students & Tokens' },
+                { id: 'tests', icon: 'file-text', label: 'Test Management' },
+                { id: 'results', icon: 'check-circle-2', label: 'Results & Logs' }
+            ];
+
+            return `
+                <div class="min-h-screen w-full bg-slate-50 flex">
+                    <div class="w-64 bg-slate-900 text-white min-h-screen p-4 flex flex-col">
+                        <div class="flex items-center gap-3 px-2 py-4 mb-6 border-b border-slate-800">
+                            <i data-lucide="shield-check" class="text-blue-400 w-7 h-7"></i>
+                            <div>
+                                <h2 class="font-bold tracking-tight">MCQ'S TEST</h2>
+                                <p class="text-xs text-slate-400">Admin Portal</p>
+                            </div>
+                        </div>
+                        <nav class="flex-1 space-y-1">
+                            ${tabs.map(t => `
+                                <button onclick="setAdminTab('${t.id}')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${appState.adminTab === t.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}">
+                                    <i data-lucide="${t.icon}" class="w-5 h-5"></i> ${t.label}
+                                </button>
+                            `).join('')}
+                        </nav>
+                        <div class="mt-auto border-t border-slate-800 pt-4">
+                            <button onclick="handleLogout()" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-red-500/10 hover:text-red-400 transition-colors">
+                                <i data-lucide="log-out" class="w-5 h-5"></i> Sign Out
+                            </button>
+                        </div>
+                    </div>
+                    <main class="flex-1 p-8 max-h-screen overflow-y-auto w-full">
+                        ${getAdminTabContent()}
+                    </main>
+                </div>
+            `;
+        }
+
+        function setAdminTab(tab) {
+            appState.adminTab = tab;
+            if(tab === 'tests') appState.editingTest = null;
+            render();
+        }
+
+        function getAdminTabContent() {
+            const students = appState.db.users.filter(u => u.role === 'STUDENT');
+            const completedAttempts = appState.db.attempts.filter(a => a.status === 'SUBMITTED');
+            const alerts = appState.db.attempts.reduce((acc, att) => acc + (att.proctorLogs?.length || 0), 0);
+
+            if (appState.adminTab === 'overview') {
+                const logsHTML = appState.db.attempts.flatMap(a => (a.proctorLogs || []).map(l => ({...l, user: appState.db.users.find(u=>u.id===a.userId)}))).slice(0,5).map(log => `
+                    <div class="flex items-center gap-4 p-3 bg-red-50 border border-red-100 rounded-lg">
+                        <i data-lucide="alert-triangle" class="text-red-500 w-5 h-5"></i>
+                        <div class="flex-1">
+                            <p class="text-sm font-medium text-slate-900">${log.user?.name || 'Unknown'} (${log.user?.rollNumber || 'N/A'})</p>
+                            <p class="text-xs text-slate-600">${log.type}: ${log.details}</p>
+                        </div>
+                        <span class="text-xs text-slate-400">${new Date(log.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                `).join('');
+
+                return `
+                    <div class="space-y-6 animate-in">
+                        <h2 class="text-2xl font-bold text-slate-900">Platform Overview</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5 border-l-4 border-l-blue-500"><p class="text-sm font-medium text-slate-500 mb-1">Total Students</p><p class="text-3xl font-bold">${students.length}</p></div>
+                            <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5 border-l-4 border-l-indigo-500"><p class="text-sm font-medium text-slate-500 mb-1">Total Tests</p><p class="text-3xl font-bold">${appState.db.tests.length}</p></div>
+                            <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5 border-l-4 border-l-emerald-500"><p class="text-sm font-medium text-slate-500 mb-1">Completed Exams</p><p class="text-3xl font-bold">${completedAttempts.length}</p></div>
+                            <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5 border-l-4 border-l-red-500"><p class="text-sm font-medium text-slate-500 mb-1">Proctoring Alerts</p><p class="text-3xl font-bold text-red-600">${alerts}</p></div>
+                        </div>
+                        <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+                            <h3 class="text-lg font-semibold text-slate-900 mb-4">Recent Cheating Logs (AI Proctoring)</h3>
+                            <div class="space-y-3">${logsHTML || '<p class="text-sm text-slate-500 italic">No suspicious activity detected yet.</p>'}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (appState.adminTab === 'students') {
+                return `
+                    <div class="space-y-6 animate-in">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-2xl font-bold text-slate-900">Student & Token Management</h2>
+                            <button onclick="generateNewToken()" class="h-10 px-4 py-2 bg-slate-900 text-white rounded-lg inline-flex items-center text-sm font-medium hover:bg-slate-800"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Generate Token</button>
+                        </div>
+                        
+                        <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                            <div class="p-4 border-b border-slate-100 bg-slate-50"><h3 class="font-semibold text-slate-800">Registration Tokens</h3></div>
+                            <table class="w-full text-sm text-left">
+                                <thead class="bg-slate-50 text-slate-500"><tr><th class="px-4 py-3 font-medium">Token Code</th><th class="px-4 py-3 font-medium">Status</th><th class="px-4 py-3 font-medium">Assigned Student</th></tr></thead>
+                                <tbody class="divide-y divide-slate-100">
+                                    ${appState.db.tokens.map(t => `
+                                        <tr class="hover:bg-slate-50">
+                                            <td class="px-4 py-3 font-mono font-medium text-slate-700">${t.code}</td>
+                                            <td class="px-4 py-3"><span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${t.isUsed ? 'bg-slate-100 text-slate-800' : 'bg-green-100 text-green-800'}">${t.isUsed ? 'Used' : 'Available'}</span></td>
+                                            <td class="px-4 py-3 text-slate-600">${t.isUsed ? (appState.db.users.find(u=>u.id===t.assignedTo)?.name || 'Unknown') : '-'}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (appState.adminTab === 'tests') return getTestBuilderHTML();
+
+            if (appState.adminTab === 'results') {
+                return `
+                    <div class="space-y-6 animate-in">
+                        <h2 class="text-2xl font-bold text-slate-900">Exam Results & Moderation</h2>
+                        <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                            <table class="w-full text-sm text-left">
+                                <thead class="bg-slate-50 text-slate-500"><tr><th class="px-4 py-3">Student</th><th class="px-4 py-3">Test</th><th class="px-4 py-3">Score</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Proctoring Logs</th><th class="px-4 py-3">Actions</th></tr></thead>
+                                <tbody class="divide-y divide-slate-100">
+                                    ${completedAttempts.length === 0 ? '<tr><td colspan="6" class="px-4 py-8 text-center text-slate-500">No completed exams yet.</td></tr>' : 
+                                    completedAttempts.map(a => {
+                                        const s = appState.db.users.find(u => u.id === a.userId);
+                                        const t = appState.db.tests.find(t => t.id === a.testId);
+                                        const warnings = a.proctorLogs?.length || 0;
+                                        const passed = a.score >= (t?.passingMarks || 0);
+                                        return `
+                                            <tr class="hover:bg-slate-50">
+                                                <td class="px-4 py-3"><p class="font-medium text-slate-900">${s?.name}</p><p class="text-xs text-slate-500">${s?.rollNumber}</p></td>
+                                                <td class="px-4 py-3 text-slate-700">${t?.title}</td>
+                                                <td class="px-4 py-3 font-medium">${a.score} / ${t?.totalMarks} <span class="ml-2 px-2.5 py-0.5 rounded-full text-xs font-semibold ${passed ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${passed?'Pass':'Fail'}</span></td>
+                                                <td class="px-4 py-3"><span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${t.status==='PUBLISHED'?'bg-green-100 text-green-800':'bg-amber-100 text-amber-800'}">${t.status}</span></td>
+                                                <td class="px-4 py-3">${warnings>0 ? `<span class="flex items-center text-red-600 font-medium"><i data-lucide="alert-triangle" class="w-4 h-4 mr-1"></i> ${warnings} Warnings</span>` : `<span class="flex items-center text-green-600"><i data-lucide="check-circle-2" class="w-4 h-4 mr-1"></i> Clean</span>`}</td>
+                                                <td class="px-4 py-3">${t.status!=='PUBLISHED' ? `<button onclick="publishResult('${t.id}')" class="h-8 px-3 text-sm bg-slate-900 text-white rounded-lg">Publish</button>` : '-'}</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function generateNewToken() {
+            appState.db.tokens.unshift({ id: generateId(), code: generateTokenCode(), isUsed: false, assignedTo: null });
+            addToast('New registration token generated', 'success');
+            render();
+        }
+        function publishResult(testId) {
+            const test = appState.db.tests.find(t=>t.id===testId);
+            if(test) test.status = 'PUBLISHED';
+            addToast('Results published successfully', 'success');
+            render();
+        }
+
+        // --- TEST BUILDER ---
+        function getTestBuilderHTML() {
+            if (appState.editingTest) {
+                const t = appState.editingTest;
+                const students = appState.db.users.filter(u=>u.role==='STUDENT');
+                return `
+                    <div class="space-y-6 animate-in">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-4">
+                                <button onclick="closeEditor()" class="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg text-sm font-medium">← Back</button>
+                                <h2 class="text-2xl font-bold text-slate-900">${t.title}</h2>
+                            </div>
+                            <div class="flex gap-2">
+                                <select id="test-status" onchange="updateTestProp('status', this.value)" class="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none">
+                                    <option value="DRAFT" ${t.status==='DRAFT'?'selected':''}>Draft</option>
+                                    <option value="SCHEDULED" ${t.status==='SCHEDULED'?'selected':''}>Scheduled</option>
+                                    <option value="ACTIVE" ${t.status==='ACTIVE'?'selected':''}>Active</option>
+                                    <option value="PUBLISHED" ${t.status==='PUBLISHED'?'selected':''}>Published (Results Visible)</option>
+                                </select>
+                                <button onclick="saveTest()" class="h-10 px-4 py-2 bg-slate-900 text-white rounded-lg inline-flex items-center text-sm font-medium hover:bg-slate-800"><i data-lucide="save" class="w-4 h-4 mr-2"></i> Save Exam</button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-6">
+                            <div class="col-span-2 space-y-6">
+                                <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+                                    <div class="flex justify-between items-center mb-4">
+                                        <h3 class="text-lg font-semibold">Questions Editor</h3>
+                                        <button onclick="toggleBulkImport()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">${appState.showBulkImport?'Close Bulk Import':'Bulk Import Text'}</button>
+                                    </div>
+                                    
+                                    ${appState.showBulkImport ? `
+                                        <div class="mb-6 p-5 border border-blue-200 bg-blue-50/50 rounded-xl space-y-4 animate-in">
+                                            <h4 class="font-bold text-blue-900 mb-1">Paste Bulk Questions</h4>
+                                            <textarea id="bulk-text" onchange="appState.bulkText=this.value" class="w-full h-56 p-3 rounded-lg border border-blue-200 text-sm font-mono whitespace-pre text-slate-800" placeholder="1. Question\\nA) Opt 1\\nB) Opt 2\\nC) Opt 3\\nD) Opt 4\\nAnswer: A\\n\\n...">${appState.bulkText}</textarea>
+                                            <button onclick="processBulk()" class="w-full h-10 bg-slate-900 text-white rounded-lg text-sm font-medium">Parse & Add All Questions</button>
+                                        </div>
+                                    ` : ''}
+
+                                    <div class="space-y-6">
+                                        ${t.questions.map((q, qIndex) => `
+                                            <div class="p-4 border border-slate-200 rounded-lg relative bg-slate-50">
+                                                <button onclick="removeQuestion('${q.id}')" class="absolute top-4 right-4 text-slate-400 hover:text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                                <div class="space-y-4">
+                                                    <div class="space-y-1"><label class="text-sm font-medium">Question ${qIndex+1}</label><input type="text" value="${q.text.replace(/"/g, '&quot;')}" onchange="updateQ('${q.id}', 'text', this.value)" class="w-full h-10 px-3 py-2 rounded border border-slate-200 text-sm"></div>
+                                                    <div class="grid grid-cols-2 gap-4">
+                                                        ${[0,1,2,3].map(optI => `
+                                                            <div class="flex items-center gap-2">
+                                                                <input type="radio" name="correct-${q.id}" ${q.correctOption===optI?'checked':''} onchange="updateQ('${q.id}', 'correct', ${optI})" class="w-4 h-4 text-blue-600">
+                                                                <input type="text" value="${(q.options[optI]||'').replace(/"/g, '&quot;')}" onchange="updateQOpt('${q.id}', ${optI}, this.value)" class="w-full h-10 px-3 py-2 rounded border border-slate-200 text-sm" placeholder="Option ${String.fromCharCode(65+optI)}">
+                                                            </div>
+                                                        `).join('')}
+                                                    </div>
+                                                    <div class="w-1/3 space-y-1"><label class="text-sm font-medium">Marks</label><input type="number" value="${q.marks}" onchange="updateQ('${q.id}', 'marks', this.value)" class="w-full h-10 px-3 py-2 rounded border border-slate-200 text-sm"></div>
+                                                </div>
+                                            </div>
+                                        `).join('')}
+                                        <button onclick="addQuestion()" class="w-full h-10 border border-dashed border-slate-300 text-slate-700 rounded-lg inline-flex items-center justify-center text-sm font-medium hover:bg-slate-50"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Add Question</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="space-y-6">
+                                <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-4">
+                                    <h3 class="font-semibold border-b pb-2">Exam Settings</h3>
+                                    <div class="space-y-1"><label class="text-sm font-medium">Exam Title</label><input type="text" value="${t.title}" onchange="updateTestProp('title', this.value)" class="w-full h-10 px-3 rounded border border-slate-200 text-sm"></div>
+                                    <div class="space-y-1"><label class="text-sm font-medium">Subject</label><input type="text" value="${t.subject}" onchange="updateTestProp('subject', this.value)" class="w-full h-10 px-3 rounded border border-slate-200 text-sm"></div>
+                                    <div class="space-y-1"><label class="text-sm font-medium">Duration (Mins)</label><input type="number" value="${t.duration}" onchange="updateTestProp('duration', this.value)" class="w-full h-10 px-3 rounded border border-slate-200 text-sm"></div>
+                                    <div class="space-y-1"><label class="text-sm font-medium">Passing Marks</label><input type="number" value="${t.passingMarks}" onchange="updateTestProp('passingMarks', this.value)" class="w-full h-10 px-3 rounded border border-slate-200 text-sm"></div>
+                                    <div class="pt-4 border-t border-slate-100">
+                                        <h4 class="text-sm font-medium mb-2">Assigned Students</h4>
+                                        <div class="space-y-2 max-h-48 overflow-y-auto">
+                                            ${students.map(s => `
+                                                <label class="flex items-center gap-2 text-sm"><input type="checkbox" ${t.assignedStudents.includes(s.id)?'checked':''} onchange="toggleStudentAssigned('${s.id}', this.checked)" class="rounded border-slate-300"> ${s.name} (${s.rollNumber})</label>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="space-y-6 animate-in">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-2xl font-bold text-slate-900">Test Management</h2>
+                        <button onclick="createTest()" class="h-10 px-4 py-2 bg-slate-900 text-white rounded-lg inline-flex items-center text-sm font-medium hover:bg-slate-800"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Create New Exam</button>
+                    </div>
+                    <div class="grid grid-cols-1 gap-4">
+                        ${appState.db.tests.map(t => `
+                            <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5 flex items-center justify-between hover:border-slate-300 transition-colors">
+                                <div>
+                                    <div class="flex items-center gap-3 mb-1">
+                                        <h3 class="text-lg font-bold text-slate-900">${t.title}</h3>
+                                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${t.status==='PUBLISHED'?'bg-green-100 text-green-800':t.status==='ACTIVE'?'bg-blue-100 text-blue-800':'bg-slate-100 text-slate-800'}">${t.status}</span>
+                                    </div>
+                                    <p class="text-sm text-slate-500 flex items-center gap-4">
+                                        <span>${t.subject}</span>
+                                        <span class="flex items-center gap-1"><i data-lucide="clock" class="w-4 h-4"></i> ${t.duration} mins</span>
+                                        <span class="flex items-center gap-1"><i data-lucide="file-text" class="w-4 h-4"></i> ${t.questions.length} Questions</span>
+                                    </p>
+                                </div>
+                                <button onclick="editTest('${t.id}')" class="h-10 px-4 py-2 border border-slate-200 rounded-lg inline-flex items-center text-sm font-medium hover:bg-slate-50 text-slate-900"><i data-lucide="edit" class="w-4 h-4 mr-2"></i> Edit Exam</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Test Builder Actions
+        function createTest() {
+            appState.editingTest = { id: generateId(), title: 'New Exam', subject: '', duration: 30, totalMarks: 0, passingMarks: 0, status: 'DRAFT', assignedStudents: [], questions: [] };
+            render();
+        }
+        function editTest(id) {
+            appState.editingTest = JSON.parse(JSON.stringify(appState.db.tests.find(t=>t.id===id)));
+            render();
+        }
+        function closeEditor() { appState.editingTest = null; render(); }
+        function saveTest() {
+            const t = appState.editingTest;
+            t.totalMarks = t.questions.reduce((sum, q) => sum + parseInt(q.marks), 0);
+            const idx = appState.db.tests.findIndex(x=>x.id===t.id);
+            if(idx >= 0) appState.db.tests[idx] = t;
+            else appState.db.tests.push(t);
+            addToast('Test saved successfully', 'success');
+            closeEditor();
+        }
+        function updateTestProp(key, val) { 
+            if(key==='duration'||key==='passingMarks') val = parseInt(val)||0;
+            appState.editingTest[key] = val; 
+        }
+        function toggleStudentAssigned(id, checked) {
+            let arr = appState.editingTest.assignedStudents || [];
+            if(checked && !arr.includes(id)) arr.push(id);
+            if(!checked) arr = arr.filter(x=>x!==id);
+            appState.editingTest.assignedStudents = arr;
+        }
+        function addQuestion() {
+            appState.editingTest.questions.push({ id: generateId(), text: '', options: ['','','',''], correctOption: 0, marks: 1 });
+            render();
+        }
+        function removeQuestion(id) {
+            appState.editingTest.questions = appState.editingTest.questions.filter(q=>q.id!==id);
+            render();
+        }
+        function updateQ(id, key, val) {
+            const q = appState.editingTest.questions.find(x=>x.id===id);
+            if(key==='correct') q.correctOption = parseInt(val);
+            else if(key==='marks') q.marks = parseInt(val)||0;
+            else q[key] = val;
+        }
+        function updateQOpt(id, index, val) {
+            appState.editingTest.questions.find(x=>x.id===id).options[index] = val;
+        }
+        function toggleBulkImport() {
+            appState.showBulkImport = !appState.showBulkImport;
+            render();
+        }
+        function processBulk() {
+            const text = document.getElementById('bulk-text')?.value || '';
+            if(!text.trim()) return;
+            const blocks = text.split(/\n\s*\n/);
+            const parsed = [];
+            blocks.forEach(block => {
+                const lines = block.split('\n').map(l=>l.trim()).filter(l=>l);
+                if(lines.length<3) return;
+                let qText = lines[0].replace(/^(Q?\d+[\.\)\-]\s*)/i, '');
+                let options = [], correctOption = 0;
+                for(let i=1; i<lines.length; i++) {
+                    const ansMatch = lines[i].match(/^(?:Answer|Correct|Ans)(?:\s*:|\s+-|=)?\s*([a-dA-D1-4])/i);
+                    if(ansMatch) {
+                        const ans = ansMatch[1].toUpperCase();
+                        if(ans==='A'||ans==='1') correctOption=0; else if(ans==='B'||ans==='2') correctOption=1; else if(ans==='C'||ans==='3') correctOption=2; else if(ans==='D'||ans==='4') correctOption=3;
+                    } else if(options.length<4) {
+                        options.push(lines[i].replace(/^([a-dA-D1-4][\.\)\-]\s*|\([a-dA-D1-4]\)\s*)/i, ''));
+                    }
+                }
+                while(options.length<4) options.push('');
+                parsed.push({ id: generateId(), text: qText, options, correctOption, marks: 1 });
+            });
+            if(parsed.length>0) {
+                appState.editingTest.questions.push(...parsed);
+                appState.bulkText = '';
+                appState.showBulkImport = false;
+                addToast(`Successfully imported ${parsed.length} questions!`, 'success');
+                render();
+            } else { addToast('Could not parse any questions.', 'error'); }
+        }
+
+
+        // --- STUDENT MODULE ---
+        function getStudentHTML() {
+            const user = appState.currentUser;
+            const assignedTests = appState.db.tests.filter(t => t.assignedStudents?.includes(user.id) && t.status !== 'DRAFT');
+            const pastAttempts = appState.db.attempts.filter(a => a.userId === user.id);
+            const upcoming = assignedTests.filter(t => !pastAttempts.some(a => a.testId === t.id));
+
+            return `
+                <div class="min-h-screen bg-slate-50 w-full flex flex-col">
+                    <header class="bg-white border-b border-slate-200 sticky top-0 z-10">
+                        <div class="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+                            <div class="flex items-center gap-2 text-slate-900"><i data-lucide="shield-check" class="text-blue-600 w-6 h-6"></i><span class="font-bold tracking-tight text-lg">MCQ'S TEST</span></div>
+                            <div class="flex items-center gap-4">
+                                <div class="text-right hidden sm:block"><p class="text-sm font-bold text-slate-900">${user.name}</p><p class="text-xs text-slate-500">${user.rollNumber}</p></div>
+                                <button onclick="handleLogout()" class="p-2 text-slate-700 hover:bg-slate-100 rounded-lg"><i data-lucide="log-out" class="w-4 h-4"></i></button>
+                            </div>
+                        </div>
+                    </header>
+                    <main class="max-w-5xl mx-auto px-4 py-8 space-y-8 w-full flex-1">
+                        <section>
+                            <h2 class="text-xl font-bold text-slate-900 mb-4">Assigned Exams</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                ${upcoming.length === 0 ? '<div class="col-span-full p-8 text-center text-slate-500 bg-white rounded-xl border border-dashed border-slate-300">No upcoming exams available.</div>' : 
+                                upcoming.map(t => `
+                                    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 flex flex-col">
+                                        <div class="flex-1">
+                                            <div class="flex justify-between items-start mb-2"><h3 class="font-bold text-lg text-slate-900">${t.title}</h3><span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${t.status==='ACTIVE'?'bg-blue-100 text-blue-800':'bg-amber-100 text-amber-800'}">${t.status}</span></div>
+                                            <p class="text-sm text-slate-600 mb-4">${t.description}</p>
+                                            <div class="flex gap-4 text-sm text-slate-500 mb-6"><span class="flex items-center gap-1"><i data-lucide="clock" class="w-4 h-4"></i> ${t.duration} mins</span><span class="flex items-center gap-1"><i data-lucide="file-text" class="w-4 h-4"></i> ${t.totalMarks} Marks</span></div>
+                                        </div>
+                                        <button onclick="initExam('${t.id}')" ${t.status!=='ACTIVE'?'disabled':''} class="w-full h-10 rounded-lg inline-flex items-center justify-center text-sm font-medium transition-colors ${t.status==='ACTIVE'?'bg-slate-900 text-white hover:bg-slate-800':'bg-slate-100 text-slate-400 cursor-not-allowed'}">
+                                            ${t.status==='ACTIVE'?'<i data-lucide="play" class="w-4 h-4 mr-2"></i> Start Exam':'<i data-lucide="lock" class="w-4 h-4 mr-2"></i> Scheduled'}
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </section>
+                        <section>
+                            <h2 class="text-xl font-bold text-slate-900 mb-4">Completed Exams & Results</h2>
+                            <div class="space-y-4">
+                                ${pastAttempts.map(a => {
+                                    const t = appState.db.tests.find(x=>x.id===a.testId);
+                                    const passed = a.score >= t.passingMarks;
+                                    return `
+                                        <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5 flex items-center justify-between">
+                                            <div><h3 class="font-bold text-slate-900">${t.title}</h3><p class="text-sm text-slate-500">Submitted Recently</p></div>
+                                            <div class="text-right">
+                                                ${t.status==='PUBLISHED' ? `
+                                                    <p class="text-2xl font-bold text-slate-900">${a.score} <span class="text-sm font-normal text-slate-500">/ ${t.totalMarks}</span></p>
+                                                    <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${passed?'bg-green-100 text-green-800':'bg-red-100 text-red-800'}">${passed?'Passed':'Failed'}</span>
+                                                ` : `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Result Pending Review</span>`}
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </section>
+                    </main>
+                </div>
+            `;
+        }
+
+        // --- EXAM ENGINE MODULE ---
+        function initExam(testId) {
+            appState.activeExamId = testId;
+            appState.view = 'exam';
+            appState.examPhase = 'PRE_CHECK';
+            appState.permissionsGranted = false;
+            appState.proctorLogs = [];
+            const test = appState.db.tests.find(t=>t.id===testId);
+            appState.examTimeLeft = test.duration * 60;
+            render();
+        }
+
+        function getExamHTML() {
+            const test = appState.db.tests.find(t=>t.id===appState.activeExamId);
+            
+            if (appState.examPhase === 'PRE_CHECK') {
+                return `
+                    <div class="min-h-screen w-full bg-slate-900 text-white flex flex-col items-center justify-center p-4 select-none">
+                        <div class="max-w-2xl w-full p-8 bg-slate-800 border-slate-700 rounded-xl text-slate-100 shadow-xl">
+                            <div class="flex items-center gap-4 mb-6 border-b border-slate-700 pb-6">
+                                <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center"><i data-lucide="shield-check" class="w-6 h-6"></i></div>
+                                <div><h1 class="text-2xl font-bold">${test.title}</h1><p class="text-slate-400">Secure AI Proctored Environment</p></div>
+                            </div>
+                            <div class="space-y-4 mb-8 text-sm text-slate-300">
+                                <h3 class="font-semibold text-white">Strict Instructions:</h3>
+                                <ul class="list-disc pl-5 space-y-2">
+                                    <li>You must grant Camera & Microphone permissions.</li>
+                                    <li>Exam runs in Fullscreen mode. Exiting is a violation.</li>
+                                    <li>Do not switch tabs, minimize, or open apps.</li>
+                                    <li>Copy, Paste, Right-click, and Dev tools are disabled.</li>
+                                </ul>
+                            </div>
+                            <div class="flex flex-col gap-4">
+                                <button onclick="requestPermissions()" class="h-10 border border-slate-600 text-white rounded-lg flex items-center justify-center hover:bg-slate-700 text-sm font-medium"><i data-lucide="laptop" class="w-4 h-4 mr-2"></i> Grant System Permissions</button>
+                                <button onclick="startExam()" ${!appState.permissionsGranted?'disabled':''} class="h-12 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">Accept Terms & Start Exam</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (appState.examPhase === 'SUBMITTED') {
+                return `
+                    <div class="min-h-screen w-full bg-slate-50 flex flex-col items-center justify-center p-4">
+                        <div class="max-w-md w-full p-8 bg-white border border-slate-200 rounded-xl shadow-sm text-center animate-in zoom-in duration-300">
+                            <div class="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6"><i data-lucide="check-circle-2" class="w-10 h-10"></i></div>
+                            <h2 class="text-2xl font-bold text-slate-900 mb-2">Exam Submitted</h2>
+                            <p class="text-slate-600 mb-8">Your exam has been successfully recorded. Results will be available once published.</p>
+                            <button onclick="finishExam()" class="w-full h-10 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800">Return to Dashboard</button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // ACTIVE EXAM VIEW
+            const q = appState.examQuestions[appState.examCurrentIdx];
+            if(!q) return '';
+            
+            const m = Math.floor(appState.examTimeLeft / 60);
+            const s = appState.examTimeLeft % 60;
+            const timeStr = `${m}:${s.toString().padStart(2, '0')}`;
+
+            return `
+                <div class="min-h-screen w-full bg-slate-100 flex flex-col select-none exam-active-container">
+                    <header class="bg-slate-900 text-white h-16 px-6 flex items-center justify-between sticky top-0 shadow-md z-20">
+                        <div class="flex items-center gap-4"><i data-lucide="shield-check" class="text-blue-400"></i><h1 class="font-bold text-lg hidden sm:block">${test.title}</h1></div>
+                        <div class="flex items-center gap-6">
+                            <div id="exam-timer-display" class="flex items-center gap-2 px-4 py-1.5 rounded-full font-mono text-lg font-bold ${appState.examTimeLeft<300?'bg-red-500/20 text-red-400':'bg-slate-800 text-slate-200'}">
+                                <i data-lucide="clock" class="w-5 h-5"></i> ${timeStr}
+                            </div>
+                            <button onclick="submitExam('Manual Submit')" class="h-8 px-3 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Submit Exam</button>
+                        </div>
+                    </header>
+                    <div class="flex-1 flex max-w-7xl w-full mx-auto p-4 gap-6 h-[calc(100vh-4rem)]">
+                        <div class="flex-1 flex flex-col">
+                            <div class="bg-white border border-slate-200 rounded-xl shadow-sm flex-1 p-8 flex flex-col">
+                                <div class="flex justify-between items-center mb-6">
+                                    <span class="text-lg font-bold text-slate-500">Question ${appState.examCurrentIdx+1} of ${appState.examQuestions.length}</span>
+                                    <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">${q.marks} Marks</span>
+                                </div>
+                                <h2 class="text-2xl font-medium text-slate-900 mb-8">${q.text}</h2>
+                                <div class="space-y-4 flex-1">
+                                    ${q.options.map((opt, i) => `
+                                        <label class="flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${appState.examAnswers[q.id]===opt.origI?'border-blue-600 bg-blue-50':'border-slate-200 hover:border-slate-300 hover:bg-slate-50'}">
+                                            <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center ${appState.examAnswers[q.id]===opt.origI?'border-blue-600':'border-slate-300'}">
+                                                ${appState.examAnswers[q.id]===opt.origI?'<div class="w-3 h-3 bg-blue-600 rounded-full"></div>':''}
+                                            </div>
+                                            <span class="text-lg text-slate-700">${opt.text}</span>
+                                            <input type="radio" class="hidden" name="q-${q.id}" ${appState.examAnswers[q.id]===opt.origI?'checked':''} onchange="answerQ('${q.id}', ${opt.origI})">
+                                        </label>
+                                    `).join('')}
+                                </div>
+                                <div class="pt-6 border-t border-slate-100 flex justify-between items-center mt-auto">
+                                    <label class="flex items-center gap-2 cursor-pointer text-slate-600 hover:text-amber-600 font-medium">
+                                        <input type="checkbox" ${appState.examMarked[q.id]?'checked':''} onchange="markQ('${q.id}', this.checked)" class="w-5 h-5 rounded border-slate-300 text-amber-500 focus:ring-amber-500"> Mark for Review
+                                    </label>
+                                    <div class="flex gap-4">
+                                        <button onclick="navQ(-1)" ${appState.examCurrentIdx===0?'disabled':''} class="h-10 px-4 border border-slate-200 rounded-lg font-medium hover:bg-slate-50 disabled:opacity-50">Previous</button>
+                                        ${appState.examCurrentIdx < appState.examQuestions.length-1 ? 
+                                            `<button onclick="navQ(1)" class="h-10 px-4 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800">Next Question</button>` : 
+                                            `<button onclick="submitExam('Completed all questions')" class="h-10 px-4 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700">Finish & Submit</button>`
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="w-72 bg-white border border-slate-200 rounded-xl shadow-sm p-6 flex flex-col hidden lg:flex">
+                            <h3 class="font-bold text-slate-900 mb-4">Question Navigator</h3>
+                            <div class="grid grid-cols-4 gap-2">
+                                ${appState.examQuestions.map((eq, i) => {
+                                    let bg = "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-transparent";
+                                    if(appState.examCurrentIdx===i) bg="bg-white border-blue-600 text-blue-600 shadow-sm";
+                                    else if(appState.examMarked[eq.id]) bg="bg-amber-100 text-amber-800 border-amber-200";
+                                    else if(appState.examAnswers[eq.id]!==undefined) bg="bg-green-100 text-green-800 border-green-200";
+                                    return `<button onclick="jumpQ(${i})" class="h-12 rounded-lg font-semibold flex items-center justify-center transition-all ${bg}">${i+1}</button>`;
+                                }).join('')}
+                            </div>
+                            <div class="mt-auto pt-6 space-y-3 border-t border-slate-100 text-sm font-medium text-slate-600">
+                                <div class="flex items-center gap-2"><div class="w-4 h-4 bg-green-100 border border-green-200 rounded"></div> Answered</div>
+                                <div class="flex items-center gap-2"><div class="w-4 h-4 bg-amber-100 border border-amber-200 rounded"></div> Marked</div>
+                                <div class="flex items-center gap-2"><div class="w-4 h-4 bg-slate-100 rounded"></div> Not Visited</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function requestPermissions() {
+            try {
+                await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                appState.permissionsGranted = true;
+                addToast('Camera and Microphone verified', 'success');
+                render();
+            } catch(e) {
+                addToast('Permission denied. Cannot start exam.', 'error');
+            }
+        }
+
+        function startExam() {
+            if(!appState.permissionsGranted) return;
+            const test = appState.db.tests.find(t=>t.id===appState.activeExamId);
+            appState.examQuestions = shuffleArray(test.questions.map(q => ({
+                id: q.id, text: q.text, marks: q.marks, 
+                options: shuffleArray(q.options.map((opt,i)=>({text:opt, origI:i}))) // stripped answer
+            })));
+            appState.examAnswers = {};
+            appState.examMarked = {};
+            appState.examCurrentIdx = 0;
+            appState.examPhase = 'ACTIVE';
+            
+            // Fullscreen
+            if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{});
+
+            appState.examTimer = setInterval(() => {
+                appState.examTimeLeft--;
+                if(appState.examTimeLeft <= 0) {
+                    clearInterval(appState.examTimer);
+                    submitExam('Timer Expired');
+                } else {
+                    // Update timer display direct DOM manipulation to avoid full re-render
+                    const el = document.getElementById('exam-timer-display');
+                    if(el) {
+                        const m = Math.floor(appState.examTimeLeft / 60);
+                        const s = appState.examTimeLeft % 60;
+                        el.innerHTML = `<i data-lucide="clock" class="w-5 h-5"></i> ${m}:${s.toString().padStart(2, '0')}`;
+                        lucide.createIcons({root: el});
+                        if(appState.examTimeLeft<300) el.className = "flex items-center gap-2 px-4 py-1.5 rounded-full font-mono text-lg font-bold bg-red-500/20 text-red-400";
+                    }
+                }
+            }, 1000);
+
+            render();
+        }
+
+        function answerQ(id, optI) { appState.examAnswers[id] = optI; render(); }
+        function markQ(id, checked) { appState.examMarked[id] = checked; render(); }
+        function navQ(dir) { appState.examCurrentIdx += dir; render(); }
+        function jumpQ(idx) { appState.examCurrentIdx = idx; render(); }
+
+        function submitExam(reason) {
+            clearInterval(appState.examTimer);
+            if(document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+            
+            const test = appState.db.tests.find(t=>t.id===appState.activeExamId);
+            let score = 0;
+            appState.examQuestions.forEach(q => {
+                const ans = appState.examAnswers[q.id];
+                const origQ = test.questions.find(x=>x.id===q.id);
+                if(ans === origQ.correctOption) score += origQ.marks;
+            });
+
+            appState.db.attempts.push({
+                id: generateId(), userId: appState.currentUser.id, testId: test.id,
+                score, status: 'SUBMITTED', submitReason: reason, proctorLogs: [...appState.proctorLogs], submittedAt: Date.now()
+            });
+
+            appState.examPhase = 'SUBMITTED';
+            render();
+        }
+        function finishExam() {
+            appState.activeExamId = null;
+            appState.view = 'student';
+            render();
+        }
+
+        // --- ANTI CHEAT LOGIC ---
+        function attachDynamicListeners() {
+            // Remove previous instances if any
+            document.removeEventListener('visibilitychange', handleVisibility);
+            document.removeEventListener('contextmenu', preventDef);
+            document.removeEventListener('copy', preventDef);
+            document.removeEventListener('paste', preventDef);
+            document.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('offline', handleOffline);
+
+            if(appState.view === 'exam' && appState.examPhase === 'ACTIVE') {
+                document.addEventListener('visibilitychange', handleVisibility);
+                document.addEventListener('contextmenu', preventDef);
+                document.addEventListener('copy', preventDef);
+                document.addEventListener('paste', preventDef);
+                document.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('offline', handleOffline);
+            }
+        }
+        function logCheat(type, details) {
+            appState.proctorLogs.push({ type, details, timestamp: Date.now() });
+            addToast(`Warning: ${details}`, 'error');
+        }
+        function handleVisibility() { if(document.hidden) logCheat('TAB_SWITCH', 'User switched tabs or minimized browser.'); }
+        function preventDef(e) { e.preventDefault(); logCheat('RESTRICTED_ACTION', `Attempted to use ${e.type}`); }
+        function handleOffline() { logCheat('NETWORK_DISCONNECT', 'Internet lost.'); submitExam('Internet Disconnected'); }
+        function handleKeyDown(e) {
+            if(e.key === 'F12' || (e.ctrlKey && ['c','v','p','s'].includes(e.key.toLowerCase()))) {
+                e.preventDefault(); logCheat('KEYBOARD_SHORTCUT', `Attempted shortcut: ${e.key}`);
+            }
+        }
+
+        // --- INIT ---
+        render();
+    </script>
+</body>
+</html>
